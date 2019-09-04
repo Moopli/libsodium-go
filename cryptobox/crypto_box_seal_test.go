@@ -113,6 +113,32 @@ func TestBoxVsBox(t *testing.T) {
 		require.Equal(t, payload, message)
 		t.Log("Payload unchanged through encrypt-decrypt.")
 	})
+
+	t.Run("Test sodiumBoxSeal -> sodiumBoxSealOpen", func(t *testing.T) {
+		payload := []byte("lorem ipsum doler sit magnet, ada piscine elit, consecutive ada piscine velit")
+
+		ciphertext, err := sodiumBoxSeal(payload, recKey.pub)
+		require.NoError(t, err)
+
+		message, err := sodiumBoxSealOpen(ciphertext, recKey.pub, recKey.priv)
+		require.NoError(t, err)
+
+		require.Equal(t, payload, message)
+		t.Log("Payload unchanged through encrypt-decrypt.")
+	})
+
+	t.Run("Test CryptoBoxSeal -> sodiumBoxSealOpen", func(t *testing.T) {
+		payload := []byte("lorem ipsum doler sit magnet, ada piscine elit, consecutive ada piscine velit")
+
+		ciphertext, rc := CryptoBoxSeal(payload, recKey.pub[:])
+		require.Equal(t, 0, rc)
+
+		message, err := sodiumBoxSealOpen(ciphertext, recKey.pub, recKey.priv)
+		require.NoError(t, err)
+
+		require.Equal(t, payload, message)
+		t.Log("Payload unchanged through encrypt-decrypt.")
+	})
 }
 
 func makeNonce(pub1 []byte, pub2 []byte ) ([]byte, error) {
@@ -182,4 +208,27 @@ func sodiumBoxSeal(msg []byte, pubKey *[chacha20poly1305.KeySize]byte) ([]byte, 
 	ret := box.Seal(out, msg, &nonce, pubKey, esk)
 
 	return ret, nil
+}
+
+func sodiumBoxSealOpen(msg []byte, recPub *[32]byte, recPriv *[32]byte) ([]byte, error) {
+	if len(msg) < 32 {
+		return nil, errors.New("Message too short")
+	}
+	var epk [32]byte
+	copy(epk[:], msg[:32])
+
+	var nonce [24]byte
+	nonceSlice, err := makeNonce(epk[:], recPub[:])
+	if err != nil {
+		return nil, err
+	}
+	copy(nonce[:], nonceSlice)
+
+
+	out, success := box.Open(nil, msg[32:], &nonce, &epk, recPriv)
+	if !success {
+		return nil, errors.New("Failed to unpack")
+	}
+
+	return out, nil
 }
