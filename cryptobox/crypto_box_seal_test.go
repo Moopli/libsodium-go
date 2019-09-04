@@ -56,7 +56,7 @@ func TestBoxVsBox(t *testing.T) {
 	recKey.pub, recKey.priv, err = box.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 
-	t.Run("Test /x/nacl/box.Seal against libsodium crypto_box_open", func(t *testing.T) {
+	t.Run("Test /x/nacl/box.Seal against libsodium crypto_box_easy_open", func(t *testing.T) {
 
 		var plaintext = []byte("Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci " +
 			"velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem")
@@ -65,7 +65,6 @@ func TestBoxVsBox(t *testing.T) {
 		// generate ephemeral asymmetric keys
 		epk, esk, err := box.GenerateKey(rand.Reader)
 		require.NoError(t, err)
-
 
 		var out = make([]byte, 0)
 		copy(out, epk[:])
@@ -82,8 +81,8 @@ func TestBoxVsBox(t *testing.T) {
 
 		decode, rc := CryptoBoxOpenEasy(ciphertext, nonce[:], epk[:], recKey.priv[:])
 		require.Equal(t, 0, rc)
-
-		t.Logf("%s", string(decode))
+		require.Equal(t, plaintext, decode)
+		t.Log("Payload unchanged through encrypt-decrypt.")
 	})
 
 	t.Run("Verify nonce equality", func(t *testing.T) {
@@ -97,19 +96,22 @@ func TestBoxVsBox(t *testing.T) {
 		require.NoError(t, err)
 
 		t.Log("Successful nonce generation. Testing nonce equality:")
+		t.Logf("Test nonce: %s", base64.URLEncoding.EncodeToString(nonceTest))
+		t.Logf("Correct nonce: %s", base64.URLEncoding.EncodeToString(nonceCorrect))
 		require.Equal(t, nonceCorrect, nonceTest)
 	})
 
-	t.Run("Test integration against sodium crypto_box_seal", func(t *testing.T) {
+	t.Run("Test sodiumBoxSeal -> crypto_box_seal_open", func(t *testing.T) {
 		payload := []byte("lorem ipsum doler sit magnet, ada piscine elit, consecutive ada piscine velit")
 
-		ciphertext, err := sodiumBoxSeal(recKey.pub, payload)
+		ciphertext, err := sodiumBoxSeal(payload, recKey.pub)
 		require.NoError(t, err)
 
 		message, rc := CryptoBoxSealOpen(ciphertext, recKey.pub[:], recKey.priv[:])
 		require.Equal(t, 0, rc)
 
 		require.Equal(t, payload, message)
+		t.Log("Payload unchanged through encrypt-decrypt.")
 	})
 }
 
@@ -159,7 +161,7 @@ func naclNonce(pub1 []byte, pub2 []byte) ([]byte, error) {
 	return out, nil
 }
 
-func sodiumBoxSeal(pubKey *[chacha20poly1305.KeySize]byte, msg []byte) ([]byte, error) {
+func sodiumBoxSeal(msg []byte, pubKey *[chacha20poly1305.KeySize]byte) ([]byte, error) {
 	var nonce [24]byte
 	// generate ephemeral asymmetric keys
 	epk, esk, err := box.GenerateKey(rand.Reader)
@@ -173,7 +175,7 @@ func sodiumBoxSeal(pubKey *[chacha20poly1305.KeySize]byte, msg []byte) ([]byte, 
 	}
 	copy(nonce[:], nonceSlice)
 
-	var out = make([]byte, 0)
+	var out = make([]byte, len(epk))
 	copy(out, epk[:])
 
 	// now seal the msg with the ephemeral key, nonce and pubKey (which is recipient's publicKey)
