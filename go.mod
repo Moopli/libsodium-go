@@ -11,3 +11,5 @@ require (
 )
 
 module github.com/GoKillers/libsodium-go
+
+go 1.13
