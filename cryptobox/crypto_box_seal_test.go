@@ -1,10 +1,13 @@
-package cryptobox
+package cryptobox_test
 
 import (
 	"crypto/rand"
+	"crypto/sha512"
 	"encoding/base64"
 	"errors"
+	"github.com/GoKillers/libsodium-go/cryptobox"
 	generichash "github.com/GoKillers/libsodium-go/cryptogenerichash"
+	"github.com/GoKillers/libsodium-go/cryptosign"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/chacha20poly1305"
@@ -17,16 +20,16 @@ import (
 var randReader = rand.Reader
 
 func TestCryptoBoxSeal(t *testing.T) {
-	sk, pk, exit := CryptoBoxKeyPair()
+	sk, pk, exit := cryptobox.CryptoBoxKeyPair()
 	if exit != 0 {
 		t.Fatalf("CryptoBoxKeyPair failed: %v", exit)
 	}
 	testStr := "test string 12345678901234567890123456789012345678901234567890"
-	cipherText, exit := CryptoBoxSeal([]byte(testStr), pk)
+	cipherText, exit := cryptobox.CryptoBoxSeal([]byte(testStr), pk)
 	if exit != 0 {
 		t.Fatalf("CryptoBoxSeal failed: %v", exit)
 	}
-	plaintext, exit := CryptoBoxSealOpen(cipherText, pk, sk)
+	plaintext, exit := cryptobox.CryptoBoxSealOpen(cipherText, pk, sk)
 	if exit != 0 {
 		t.Fatalf("CryptoBoxSealOpen failed: %v", exit)
 	}
@@ -72,14 +75,14 @@ func TestBoxVsBox(t *testing.T) {
 		// now seal the msg with the ephemeral key, nonce and pubKey (which is recipient's publicKey)
 		ciphertext := box.Seal(out, plaintext, &nonce, recKey.pub, esk)
 
-		ciphertext2, rc := CryptoBoxEasy(plaintext, nonce[:], recKey.pub[:], esk[:])
+		ciphertext2, rc := cryptobox.CryptoBoxEasy(plaintext, nonce[:], recKey.pub[:], esk[:])
 		require.Equal(t, 0, rc)
 		t.Logf("box.Seal: %s", base64.URLEncoding.EncodeToString(ciphertext))
 		t.Logf("crypto_box_easy: %s", base64.URLEncoding.EncodeToString(ciphertext2))
 
 		require.Equal(t, ciphertext, ciphertext2)
 
-		decode, rc := CryptoBoxOpenEasy(ciphertext, nonce[:], epk[:], recKey.priv[:])
+		decode, rc := cryptobox.CryptoBoxOpenEasy(ciphertext, nonce[:], epk[:], recKey.priv[:])
 		require.Equal(t, 0, rc)
 		require.Equal(t, plaintext, decode)
 		t.Log("Payload unchanged through encrypt-decrypt.")
@@ -107,7 +110,7 @@ func TestBoxVsBox(t *testing.T) {
 		ciphertext, err := sodiumBoxSeal(payload, recKey.pub)
 		require.NoError(t, err)
 
-		message, rc := CryptoBoxSealOpen(ciphertext, recKey.pub[:], recKey.priv[:])
+		message, rc := cryptobox.CryptoBoxSealOpen(ciphertext, recKey.pub[:], recKey.priv[:])
 		require.Equal(t, 0, rc)
 
 		require.Equal(t, payload, message)
@@ -130,7 +133,7 @@ func TestBoxVsBox(t *testing.T) {
 	t.Run("Test CryptoBoxSeal -> sodiumBoxSealOpen", func(t *testing.T) {
 		payload := []byte("lorem ipsum doler sit magnet, ada piscine elit, consecutive ada piscine velit")
 
-		ciphertext, rc := CryptoBoxSeal(payload, recKey.pub[:])
+		ciphertext, rc := cryptobox.CryptoBoxSeal(payload, recKey.pub[:])
 		require.Equal(t, 0, rc)
 
 		message, err := sodiumBoxSealOpen(ciphertext, recKey.pub, recKey.priv)
@@ -139,6 +142,49 @@ func TestBoxVsBox(t *testing.T) {
 		require.Equal(t, payload, message)
 		t.Log("Payload unchanged through encrypt-decrypt.")
 	})
+}
+
+func TestKeyConversion(t *testing.T) {
+	var err error
+
+	t.Run("Test secret key conversion from Ed25519 to curve25519", func(t *testing.T) {
+		testKey := keyPairEd25519{}
+		testKey.pub, testKey.priv, err = sign.GenerateKey(randReader)
+		require.NoError(t, err)
+
+		ret, rc := cryptosign.CryptoSignEd25519SkToCurve25519(testKey.priv[:])
+		require.Equal(t, 0, rc)
+
+		ret2, err := secretEC25519toCurve25519(testKey.priv)
+		require.NoError(t, err)
+
+		print("Expected conversion: ", base64.URLEncoding.EncodeToString(ret), "\n")
+		print("Actual conversion  : ", base64.URLEncoding.EncodeToString(ret2[:]), "\n")
+		require.ElementsMatch(t, ret, ret2[:])
+	})
+
+
+}
+
+// secretEC25519toCurve25519 converts a secret key from Ed25519 to curve25519 format
+// Made with reference to https://github.com/agl/ed25519/blob/master/extra25519/extra25519.go and
+// https://github.com/jedisct1/libsodium/blob/927dfe8e2eaa86160d3ba12a7e3258fbc322909c/src/libsodium/crypto_sign/ed25519/ref10/keypair.c#L70
+func secretEC25519toCurve25519(priv *[chacha20poly1305.KeySize + chacha20poly1305.KeySize]byte) (*[chacha20poly1305.KeySize]byte, error) {
+	hasher := sha512.New()
+	_, err := hasher.Write(priv[:32])
+	if err != nil {
+		return nil, err
+	}
+
+	hash := hasher.Sum(nil)
+
+	hash[0] &= 248  // clr lower 3 bits
+	hash[31] &= 127 // clr upper 1 bit
+	hash[31] |= 64  // set 6th bit
+
+	out := new([chacha20poly1305.KeySize]byte)
+	copy(out[:], hash)
+	return out, nil
 }
 
 func makeNonce(pub1 []byte, pub2 []byte ) ([]byte, error) {
