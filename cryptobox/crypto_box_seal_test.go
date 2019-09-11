@@ -163,8 +163,16 @@ func TestKeyConversion(t *testing.T) {
 		require.ElementsMatch(t, ret, ret2[:])
 	})
 
-
+	t.Run("Test public key conversion from Ed25519 to curve25519", func(t *testing.T) {
+		require.Fail(t, "Not implemented")
+	})
 }
+
+// TODO create publicEC25519toCurve25519 converter
+func publicEC25519toCurve25519(pub *[chacha20poly1305.KeySize]byte) (*[chacha20poly1305.KeySize]byte, error) {
+	return nil, errors.New("Not implemented")
+}
+
 
 // secretEC25519toCurve25519 converts a secret key from Ed25519 to curve25519 format
 // Made with reference to https://github.com/agl/ed25519/blob/master/extra25519/extra25519.go and
