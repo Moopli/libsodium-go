@@ -8,6 +8,8 @@ import (
 	"github.com/GoKillers/libsodium-go/cryptobox"
 	generichash "github.com/GoKillers/libsodium-go/cryptogenerichash"
 	"github.com/GoKillers/libsodium-go/cryptosign"
+	"github.com/agl/ed25519/extra25519"
+	"github.com/btcsuite/btcutil/base58"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/chacha20poly1305"
@@ -155,7 +157,7 @@ func TestKeyConversion(t *testing.T) {
 		ret, rc := cryptosign.CryptoSignEd25519SkToCurve25519(testKey.priv[:])
 		require.Equal(t, 0, rc)
 
-		ret2, err := secretEC25519toCurve25519(testKey.priv)
+		ret2, err := secretEd25519toCurve25519(testKey.priv)
 		require.NoError(t, err)
 
 		print("Expected conversion: ", base64.URLEncoding.EncodeToString(ret), "\n")
@@ -164,20 +166,100 @@ func TestKeyConversion(t *testing.T) {
 	})
 
 	t.Run("Test public key conversion from Ed25519 to curve25519", func(t *testing.T) {
-		require.Fail(t, "Not implemented")
+		testKey := keyPairEd25519{}
+		testKey.pub, testKey.priv, err = sign.GenerateKey(randReader)
+		require.NoError(t, err)
+
+		pub1, rc := cryptosign.CryptoSignEd25519PkToCurve25519(testKey.pub[:])
+		require.Equal(t, 0, rc)
+
+		pub2, err := publicEd25519toCurve25519(testKey.pub)
+		require.NoError(t, err)
+
+		print("Expected conversion: ", base64.URLEncoding.EncodeToString(pub1), "\n")
+		print("Actual conversion  : ", base64.URLEncoding.EncodeToString(pub2[:]), "\n")
+		require.ElementsMatch(t, pub1, pub2[:])
+	})
+
+	t.Run("Test large number of public key conversions", func(t *testing.T) {
+		testKey := keyPairEd25519{}
+
+		for i := 0; i < 30000; i++ {
+			testKey.pub, testKey.priv, err = sign.GenerateKey(randReader)
+			require.NoError(t, err)
+
+			pub1, rc := cryptosign.CryptoSignEd25519PkToCurve25519(testKey.pub[:])
+			require.Equal(t, 0, rc)
+
+			pub2, err := publicEd25519toCurve25519(testKey.pub)
+			require.NoError(t, err)
+
+			require.ElementsMatch(t, pub1, pub2[:])
+		}
+
+	})
+
+	t.Run("Generate public key test data", func(t *testing.T) {
+
+		edKey := keyPairEd25519{}
+		keys := []keyPairEd25519{}
+		for i := 0; i < 20; i++ {
+			edKey.pub, edKey.priv, err = sign.GenerateKey(randReader)
+			keys = append(keys, edKey)
+			require.NoError(t, err)
+			keyString := base58.Encode(edKey.pub[:])
+			print("\"", keyString, "\",\n")
+		}
+
+		println("")
+
+		for _, key := range keys {
+			curvePub, rc := cryptosign.CryptoSignEd25519PkToCurve25519(key.pub[:])
+			require.Equal(t, 0, rc)
+
+			keyString := base58.Encode(curvePub[:])
+			print("\"", keyString, "\",\n")
+		}
+	})
+
+	t.Run("Generate private key test data", func(t *testing.T) {
+
+		edKey := keyPairEd25519{}
+		keys := []keyPairEd25519{}
+		for i := 0; i < 20; i++ {
+			edKey.pub, edKey.priv, err = sign.GenerateKey(randReader)
+			keys = append(keys, edKey)
+			require.NoError(t, err)
+			keyString := base58.Encode(edKey.priv[:])
+			print("\"", keyString, "\",\n")
+		}
+
+		println("")
+
+		for _, key := range keys {
+			curvePriv, rc := cryptosign.CryptoSignEd25519SkToCurve25519(key.priv[:])
+			require.Equal(t, 0, rc)
+
+			keyString := base58.Encode(curvePriv[:])
+			print("\"", keyString, "\",\n")
+		}
 	})
 }
 
-// TODO create publicEC25519toCurve25519 converter
-func publicEC25519toCurve25519(pub *[chacha20poly1305.KeySize]byte) (*[chacha20poly1305.KeySize]byte, error) {
-	return nil, errors.New("Not implemented")
+func publicEd25519toCurve25519(pub *[chacha20poly1305.KeySize]byte) (*[chacha20poly1305.KeySize]byte, error) {
+	pkOut := new([32]byte)
+	success := extra25519.PublicKeyToCurve25519(pkOut, pub)
+	if !success {
+		return nil, errors.New("Failed to convert public key")
+	}
+	return pkOut, nil
 }
 
 
-// secretEC25519toCurve25519 converts a secret key from Ed25519 to curve25519 format
+// secretEd25519toCurve25519 converts a secret key from Ed25519 to curve25519 format
 // Made with reference to https://github.com/agl/ed25519/blob/master/extra25519/extra25519.go and
 // https://github.com/jedisct1/libsodium/blob/927dfe8e2eaa86160d3ba12a7e3258fbc322909c/src/libsodium/crypto_sign/ed25519/ref10/keypair.c#L70
-func secretEC25519toCurve25519(priv *[chacha20poly1305.KeySize + chacha20poly1305.KeySize]byte) (*[chacha20poly1305.KeySize]byte, error) {
+func secretEd25519toCurve25519(priv *[chacha20poly1305.KeySize + chacha20poly1305.KeySize]byte) (*[chacha20poly1305.KeySize]byte, error) {
 	hasher := sha512.New()
 	_, err := hasher.Write(priv[:32])
 	if err != nil {
